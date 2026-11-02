@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "HSRUIE - UVTD完整推理",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--dataroot",
+                "./datasets/UVTD",
+                "--name",
+                "maps_cyclegan",
+                "--model",
+                "cycle_gan",
+                "--gpu_ids",
+                "0",
+                "--num_test",
+                "5380",
+                "--epoch",
+                "latest",
+                "--results_dir",
+                "./results"
+            ],
+            "justMyCode": false
+        }
+    ]
+}

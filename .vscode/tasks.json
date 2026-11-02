@@ -1,0 +1,114 @@
+
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "HSRUIE - UVTD完整推理",
+            "type": "process",
+            "command": "D:\\Miniconda3\\envs\\hsruie\\python.exe",
+            "args": [
+                "${workspaceFolder}\\test.py",
+                "--dataroot",
+                "D:\\Research\\UVTD\\Raw",
+                "--name",
+                "maps_cyclegan",
+                "--model",
+                "cycle_gan",
+                "--dataset_mode",
+                "single",
+                "--gpu_ids",
+                "0",
+                "--checkpoints_dir",
+                "${workspaceFolder}\\checkpoints",
+                "--num_test",
+                "5380",
+                "--max_dataset_size",
+                "5380",
+                "--epoch",
+                "latest",
+                "--results_dir",
+                "${workspaceFolder}\\results_uvtd_full",
+                "--eval"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\.."
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        }，
+        {
+            "label": "HSRUIE - SUIM测试3张",
+            "type": "process",
+            "command": "D:\\Miniconda3\\envs\\hsruie\\python.exe",
+            "args": [
+                "${workspaceFolder}\\test.py",
+                "--dataroot",
+                "D:\\Research\\SUIM\\TEST_padded_images",
+                "--name",
+                "maps_cyclegan",
+                "--model",
+                "cycle_gan",
+                "--dataset_mode",
+                "single",
+                "--gpu_ids",
+                "0",
+                "--checkpoints_dir",
+                "${workspaceFolder}\\checkpoints",
+                "--num_test",
+                "3",
+                "--max_dataset_size",
+                "110",
+                "--results_dir",
+                "${workspaceFolder}\\results_suim_test3",
+                "--eval"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\.."
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "HSRUIE - SUIM完整推理110张",
+            "type": "process",
+            "command": "D:\\Miniconda3\\envs\\hsruie\\python.exe",
+            "args": [
+                "${workspaceFolder}\\test.py",
+                "--dataroot",
+                "D:\\Research\\SUIM\\TEST_padded_images",
+                "--name",
+                "maps_cyclegan",
+                "--model",
+                "cycle_gan",
+                "--dataset_mode",
+                "single",
+                "--gpu_ids",
+                "0",
+                "--checkpoints_dir",
+                "${workspaceFolder}\\checkpoints",
+                "--num_test",
+                "110"
+                "--max_dataset_size",
+                "110",
+                "--results_dir",
+                "${workspaceFolder}\\results_suim_full"
+                "--eval"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\.."
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        }
+
+    ]
+}

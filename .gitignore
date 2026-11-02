@@ -1,0 +1,27 @@
+# Python 自动缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 模型权重
+*.pth
+*.pt
+*.h5
+*.hdf5
+*.ckpt
+
+# 训练与推理输出
+results*/
+runs/
+wandb/
+logs/
+
+# 模型权重目录
+checkpoints/
+model_data/
+
+# 如果以后将数据集放进项目内部
+datasets/
+
+
+123
