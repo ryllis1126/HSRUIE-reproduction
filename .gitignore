@@ -1,27 +1,29 @@
-# Python 自动缓存
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# 模型权重
+# Python environments
+.venv/
+venv/
+env/
+
+# Datasets
+datasets/
+
+# Model weights
 *.pth
 *.pt
-*.h5
-*.hdf5
 *.ckpt
 
-# 训练与推理输出
-results*/
+# Experiment outputs
 runs/
 wandb/
 logs/
+results/
+results_*/
+events.out.tfevents.*
 
-# 模型权重目录
-checkpoints/
-model_data/
-
-# 如果以后将数据集放进项目内部
-datasets/
-
-
-123
+# Local configuration and credentials
+.env
+.env.*
