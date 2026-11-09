@@ -1,5 +1,7 @@
 # 当前源码的模型结构
 
+> 2026-11-09 新增独立 Stage 1：冻结原 VGG E→原样 SAD G（双域共享），不经过 NC/LOW/HIGH/CLIP/U-Net；见 [实现文档](stage1_implementation.md)。`models/vggloss.py:14–25` 仅增加显式权重路径/设备加载分支，切片移至 :34–43，原 forward 移至 :48–55，计算不变。下文为历史发布推理结构与旧行号，不表示新 Stage 1 已完成论文结构认证。
+
 更新日期：2026-11-02；源码 HEAD：21ff69916b5ce95a1f4a1aea89b23d15c0a15d4b。本文描述实际发布代码，不将它等同于论文完整实现。论文协议见 [paper_protocol](paper_protocol.md)。
 
 ## 当前活动入口

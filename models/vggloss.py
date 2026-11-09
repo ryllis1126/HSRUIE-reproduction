@@ -11,10 +11,18 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Vgg19_out(nn.Module):
-    def __init__(self, requires_grad=False):
+    def __init__(self, requires_grad=False, weight_path=None, device=None):
         super(Vgg19_out, self).__init__()
-        vgg = models.vgg19(pretrained=False).cuda()
-        vgg.load_state_dict(torch.load('HSRUIE/model_data/vgg19-dcbb9e9d.pth', map_location={'cuda:1':'cuda:0'}))
+        if weight_path is None and device is None:
+            # Preserve the published caller's loading/device behavior.
+            vgg = models.vgg19(pretrained=False).cuda()
+            vgg.load_state_dict(torch.load('HSRUIE/model_data/vgg19-dcbb9e9d.pth', map_location={'cuda:1':'cuda:0'}))
+        else:
+            if weight_path is None:
+                raise ValueError('An explicit weight_path is required with device')
+            vgg = models.vgg19(pretrained=False)
+            vgg.load_state_dict(torch.load(weight_path, map_location='cpu'), strict=True)
+            vgg = vgg.to(device if device is not None else 'cpu')
         vgg_pretrained_features = vgg.features
         # print(vgg_pretrained_features)
         self.requires_grad = requires_grad

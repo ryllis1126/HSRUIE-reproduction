@@ -1,5 +1,7 @@
 # 实验计划与验收条件
 
+> 2026-11-09 P2 更新：用户已授权最小 Stage 1 实现与本地合成数据测试，见 [实现文档](stage1_implementation.md)。下文“仅授权文档”的描述保留为历史上下文，不能覆盖本次授权。真实服务器验收尚待执行；正式训练仍未授权，短边不足图像只报告、不缩放/填充/删除。
+
 更新日期：2026-11-02。本文全为计划，尚未执行；用户当前只授权文档整理，暂不进行 UVTD 全量推理。必须先遵守 [AGENTS.md](../AGENTS.md) 和 [决策日志](decision_log.md)。论文目标见 [paper_protocol](paper_protocol.md)，当前缺口见 [known_issues](known_issues.md)。
 
 ## 优先级与阻塞总览
