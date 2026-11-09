@@ -27,3 +27,6 @@ events.out.tfevents.*
 # Local configuration and credentials
 .env
 .env.*
+
+checkpoints/**/test_opt.txt
+checkpoints/**/train_opt.txt
