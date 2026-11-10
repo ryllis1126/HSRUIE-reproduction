@@ -1,5 +1,71 @@
 # Stage 1 最小实现方案与验收记录
 
+## 2026-11-10 D-11 反射填充（最新实现与验收）
+
+用户已批准在内存处理UVTD两种尺寸：352×224上下各reflect16，224×352左右各reflect16；其余合法图不填充，随后沿用随机256crop、RGB及[-1,1]。这是工程适配，不是论文明确操作。反射只启用于水下域的上述精确尺寸，不自行扩展到Flickr2K或其他未授权短尺寸。门禁继续拒绝坏图和未授权尺寸，不缩放、不删除、不静默过滤。
+
+本次基线3102bc2d80555ccd86edae00799fe9583a259334，工作区开始时干净。用户报告此前服务器真实GPU Smoke成功，本次不重跑GPU、不执行正式训练。
+
+- [x] 先新增CPU合成测试：两方向尺寸、手算reflect边界、精确crop/值域/原图不变、无需填充、统计、全域门禁与坏图、Smoke/Train一致性。
+- [x] 仅修改Dataset预处理和入口门禁/有效配置；原模型、损失、优化器、日程、checkpoint字段结构不改。实际策略进入原config.preprocess和data记录，旧配置不能静默精确续训。
+- [x] 保留原27项测试的方法及门禁断言；原短图失败fixture改为未获批准的352×223，新增批准尺寸成功断言。追加D-11与独立测试/diff记录，交付后停止。
+
+**数据与评价边界**：本次Stage1协议使用全部5380张UVTD Raw；预期483+21=504张填充、4876张不填充，属于用户提供的数据统计，需由服务器新版data-check复核。后续在这些5380张上的评价不能称为完全独立的未见测试。
+
+### 实际预处理和data-check变化
+
+`data/stage1_dataset.py:39–54`增加共享`prepare_image`：解码后转RGB，仅对水下域批准尺寸在内存调用`np.pad(...,mode='reflect')`，返回图像及元数据；不重写像素内部内容、不保存文件。`read_crop:86–96`在prepare后使用原`random.randint`坐标、原PIL裁剪与ToTensor/Normalize等价运算。RGB转换与反射操作可交换，此实现先转RGB便于共享CHW契约。
+
+| UVTD原始宽×高 | 左/上/右/下填充 | 裁剪前宽×高 | 用户提供的预期张数 |
+|---|---|---|---:|
+| 352×224 | 0/16/0/16，reflect | 352×256 | 483 |
+| 224×352 | 16/0/16/0，reflect | 256×352 | 21 |
+| 其他原本合法尺寸 | 0/0/0/0 | 原尺寸 | 4876 |
+
+旧行为：上述504张作为`too_small`阻止运行。新行为：它们不再进入`too_small`，而是计入`padding_count`和`requires_padding`；其余合格图计入`no_padding_count`。每条可处理图像记录原`width/height/mode`以及`original_size`、`padded_size`、`padding.{left,top,right,bottom}`、`strategy`和`policy`。水下策略标识`uvtd-reflect16-352x224-224x352-v1`；空气域保持`crop256-only`。不可读项仍列入errors并阻断；未批准短尺寸仍列too_small并阻断，不自动推导新填充量。
+
+data-check/train完整Raw/HR根检查、Smoke人工清单范围/每域最少2张/全部清单项真实裁剪检查均保留。两模式Dataset对Xu使用同一反射处理，对Xa保持原处理。训练清单仍显式传入；本次正式协议必须包含全部5380张Raw，不能用过滤清单冒充全量训练。全域统计和训练清单元信息分别存data_check.json/training_data_check.json；有效配置明确记新预处理。checkpoint顶层字段、保存恢复代码和网络state_dict键不变，但预处理数值协议已改变，旧配置精确恢复会被原有严格比较拒绝。
+
+### 本轮修改文件和测试结果
+
+本轮共7个文件：修改`data/stage1_dataset.py`、`train_stage1.py`；新增`tests/test_stage1_reflect.py`；对`tests/test_stage1.py`和`tests/test_stage1_smoke_gate.py`仅调整与已批准规则冲突的非法尺寸fixture及read_crop参数转发；更新本文和`docs/decision_log.md`的D-11。原27个测试方法全部保留，未删除或放松原有断言。stage1.py、models、options、原train.py/test.py无源码变更。
+
+**实验事实**：Run `stage1-reflect-20261110-01`，2026-11-10 21:19:32–21:19:40（Asia/Shanghai；日志UTC），unittest运行6.557秒。Python3.8.20/torch2.0.1+cu118/torchvision0.15.2+cu118/NumPy1.24.4/Pillow9.4.0；模型测试仅CPU，子进程显式CUDA_VISIBLE_DEVICES为空。命令：
+
+```text
+D:/Miniconda3/envs/hsruie/python.exe -B -m unittest discover -s tests -p "test_stage1*.py" -v
+```
+
+**38通过、0失败、0跳过：原27项回归＋新增11项。** 新增覆盖：两方向精确尺寸/16px量；独立手算边界排除边缘值（区分reflect与replicate/zero）；独立拼接oracle核对裁剪坐标/逐元素值/float32/[-1,1]/原文件字节；合法原图不填充；合成3张统计2填充/1不填充且零过滤；全域检查通过；未列入清单的坏图仍阻止train；Smoke和Train报告/实际Dataset处理一致；不将策略延伸到Flickr2K或未授权尺寸。
+
+先运行新增测试，因新处理API不存在及旧门禁阻止而失败，保存[RED日志](../runs/stage1-reflect-20261110-01/red_output.txt)；再最小实现、运行新增与完整回归。独立只读审查未发现Critical/Important/Minor问题。完整证据：[全部38项测试结果](../runs/stage1-reflect-20261110-01/test_output.txt)、[命令/环境/源码快照/种子记录](../runs/stage1-reflect-20261110-01/record.json)、[完整Diff](../runs/stage1-reflect-20261110-01/changes.patch)。本地只验证合成样本计数，没有生成5380份伪资产或把预期数写成实测数。原27项CPU模型/恢复fixture仍为历史已说明的合成测试，不是正式训练。
+
+### 下一步服务器命令（仅供审查，未执行）
+
+首先只运行CPU完整data-check，复核用户提供的真实计数；失败时保留报告，不过滤图片。下述命令不生成训练/Smoke清单，不运行GPU或训练：
+
+```bash
+cd /home/czy/projects/HSRUIE-reproduction
+RUN_ID="reflect-data-check-$(date +%Y%m%dT%H%M%S)-$$"
+OUTPUT_ROOT=/data/czy/experiments/HSRUIE/stage1
+python -B train_stage1.py --mode data-check \
+  --underwater-root /data/czy/datasets/UVTD_import/UVTD/Raw \
+  --inair-root /data/czy/datasets/Flickr2K \
+  --output-root "$OUTPUT_ROOT" --run-id "$RUN_ID"
+
+python - "$OUTPUT_ROOT/$RUN_ID/data_check.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as stream:
+    report = json.load(stream)
+u = report['underwater']
+print({k: u[k] for k in ('count', 'readable', 'padding_count', 'no_padding_count', 'skipped')})
+assert (u['count'], u['readable'], u['padding_count'], u['no_padding_count']) == (5380, 5380, 504, 4876)
+assert not u['errors'] and not u['too_small'] and u['skipped'] == 0
+PY
+```
+
+审查通过后可用文后原Smoke命令、全新run-id和人工选择包含两种短图的水下清单再次做真实组件诊断；其结果属于新反射协议的Smoke，不能用用户报告的旧Smoke日志替代。本轮没有执行该GPU步骤或正式训练，未commit/push/reset。后面的D-09/D-10实现与测试段落是历史证据；其中“所有短图拒绝/无padding/服务器Smoke未执行”的状态由本节和D-11更新，不能覆盖本节最新授权与证据。
+
 更新日期：2026-11-10；分支 repro/stage1；Smoke门禁修复基线55aad4a3e66abb5620669618ea3aa9f8c2bed8a2。以下11月9日实现/测试内容保留为历史证据，最新门禁与测试记录见文末。
 
 ## 当前方案（先更新方案，再实施并测试）

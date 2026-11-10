@@ -313,7 +313,8 @@ class Stage1Tests(unittest.TestCase):
             u, a = root / 'u', root / 'a'
             u.mkdir()
             a.mkdir()
-            Image.new('RGB', (352, 224)).save(u / 'short.bmp')
+            # D-11 approves 352x224; keep this rejection test on an unapproved size.
+            Image.new('RGB', (352, 223)).save(u / 'short.bmp')
             Image.new('RGB', (256, 256)).save(a / 'good.png')
             command = [sys.executable, '-B', 'train_stage1.py', '--mode', 'data-check',
                        '--underwater-root', str(u), '--inair-root', str(a),
@@ -322,7 +323,7 @@ class Stage1Tests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             output = root / 'runs' / 'check'
             report = json.loads((output / 'data_check.json').read_text(encoding='utf-8'))
-            self.assertEqual(report['underwater']['too_small'][0]['height'], 224)
+            self.assertEqual(report['underwater']['too_small'][0]['height'], 223)
             self.assertFalse(list(output.glob('*.pth')))
             before = (output / 'data_check.json').read_bytes()
             rerun = subprocess.run(command, capture_output=True, text=True)

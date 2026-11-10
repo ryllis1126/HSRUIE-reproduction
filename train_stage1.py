@@ -16,7 +16,7 @@ import torch
 import torchvision
 from torch.utils.data import DataLoader
 
-from data.stage1_dataset import Stage1Dataset, check_images, image_paths, read_crop
+from data.stage1_dataset import Stage1Dataset, UVTD_REFLECT_POLICY, check_images, image_paths, read_crop
 from stage1 import (build_model, load_checkpoint, make_optimizer, make_scheduler,
                     save_checkpoint, seed_everything, seed_worker, train_step)
 
@@ -177,13 +177,13 @@ def run(args):
         paths_a = image_paths(args.inair_root, args.inair_manifest if args.mode == 'smoke' else None)
         if args.mode == 'smoke' and (len(paths_u) < 2 or len(paths_a) < 2):
             raise ValueError('Smoke manifests must each contain at least 2 distinct images')
-        report = {'underwater': check_images(paths_u), 'inair': check_images(paths_a)}
+        report = {'underwater': check_images(paths_u, allow_uvtd_reflect=True), 'inair': check_images(paths_a)}
         if args.mode == 'smoke':
-            for domain in report.values():
+            for domain_name, domain in report.items():
                 for record in domain['records']:
-                    if min(record['width'], record['height']) >= 256:
+                    if min(record.get('padded_size', [record['width'], record['height']])) >= 256:
                         try:
-                            read_crop(record['path'])  # Validate every listed RGB/crop, not just the sampled batch.
+                            read_crop(record['path'], allow_uvtd_reflect=(domain_name == 'underwater'))
                         except (OSError, ValueError) as exc:
                             domain['errors'].append({'path': record['path'], 'error': str(exc)})
         write_json(run_dir / 'data_check.json', report)
@@ -200,7 +200,7 @@ def run(args):
             # the full-domain gate above cannot be bypassed by that selection.
             paths_u = image_paths(args.underwater_root, args.underwater_manifest)
             paths_a = image_paths(args.inair_root, args.inair_manifest)
-            report = {'underwater': check_images(paths_u), 'inair': check_images(paths_a)}
+            report = {'underwater': check_images(paths_u, allow_uvtd_reflect=True), 'inair': check_images(paths_a)}
             write_json(run_dir / 'training_data_check.json', report)
             if any(d['too_small'] or d['errors'] for d in report.values()):
                 raise ValueError('Training data-check blocked: invalid images in training manifests')
@@ -208,7 +208,7 @@ def run(args):
         config = {k: getattr(args, k) for k in ('mode', 'g_init', 'batch_size', 'lr', 'beta1',
                   'fixed_epochs', 'decay_epochs', 'num_workers', 'seed', 'device')}
         config.update({'vgg_weights': str(vgg), 'vgg_sha256': sha256(vgg),
-                       'data': report, 'preprocess': 'RGB; crop256 only; [-1,1]',
+                       'data': report, 'preprocess': 'RGB; underwater {} then crop256; inair crop256 only; [-1,1]'.format(UVTD_REFLECT_POLICY),
                        'loss': 'mean L1; per-image CHW cosine; mean hinge; margin1; weights1/0.1',
                        'sampling': 'max lengths; cyclic underwater; random air with replacement; keep tail'})
         seed_everything(args.seed)

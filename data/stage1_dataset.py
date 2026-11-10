@@ -1,4 +1,4 @@
-"""Stage 1: independent RGB domains; crop only, never resize/pad/filter."""
+"""Stage 1: approved in-memory UVTD reflection, then crop; never resize/filter."""
 import random
 from pathlib import Path
 
@@ -9,6 +9,9 @@ from torch.utils.data import Dataset
 
 
 EXTENSIONS = {'.bmp', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.ppm'}
+UVTD_REFLECT_POLICY = 'uvtd-reflect16-352x224-224x352-v1'
+# (width, height) -> (left, top, right, bottom); no inferred padding policy.
+UVTD_PADDING = {(352, 224): (0, 16, 0, 16), (224, 352): (16, 0, 16, 0)}
 
 
 def image_paths(root, manifest=None):
@@ -33,30 +36,57 @@ def image_paths(root, manifest=None):
     return paths
 
 
-def check_images(paths):
+def prepare_image(image, allow_uvtd_reflect=False):
+    """D-11 engineering adaptation, enabled only for the underwater domain."""
+    image = image.convert('RGB')
+    w, h = image.size
+    left = top = right = bottom = 0
+    if min(w, h) < 256:
+        if not allow_uvtd_reflect or (w, h) not in UVTD_PADDING:
+            raise ValueError('Image is smaller than 256 without an approved reflection policy: {}'.format((w, h)))
+        left, top, right, bottom = UVTD_PADDING[(w, h)]
+        pixels = np.pad(np.asarray(image), ((top, bottom), (left, right), (0, 0)), mode='reflect')
+        image = Image.fromarray(pixels, mode='RGB')
+    metadata = {'original_size': [w, h], 'padded_size': list(image.size),
+                'padding': {'left': left, 'top': top, 'right': right, 'bottom': bottom},
+                'strategy': 'reflect_then_random_crop256' if any((left, top, right, bottom)) else 'random_crop256',
+                'policy': UVTD_REFLECT_POLICY if allow_uvtd_reflect else 'crop256-only'}
+    return image, metadata
+
+
+def check_images(paths, allow_uvtd_reflect=False):
     """Report every member; callers must reject the entire run on any issue."""
-    records, small, errors = [], [], []
+    records, small, errors, padded = [], [], [], []
+    no_padding = 0
     for path in paths:
         try:
             with Image.open(path) as image:
                 image.load()
                 w, h = image.size
                 record = {'path': str(path), 'width': w, 'height': h, 'mode': image.mode}
-            records.append(record)
-            if min(w, h) < 256:
-                small.append(record)
+                records.append(record)
+                if min(w, h) < 256 and not (allow_uvtd_reflect and (w, h) in UVTD_PADDING):
+                    record['strategy'] = 'unsupported_short_image'
+                    small.append(record)
+                    continue
+                _, metadata = prepare_image(image, allow_uvtd_reflect=allow_uvtd_reflect)
+                record.update(metadata)
+                if any(metadata['padding'].values()):
+                    padded.append(record)
+                else:
+                    no_padding += 1
         except (OSError, ValueError) as exc:
             errors.append({'path': str(path), 'error': str(exc)})
     return {'count': len(paths), 'readable': len(records), 'records': records,
-            'too_small': small, 'errors': errors, 'skipped': 0}
+            'too_small': small, 'errors': errors, 'skipped': 0,
+            'padding_count': len(padded), 'no_padding_count': no_padding, 'requires_padding': padded,
+            'preprocessing_policy': UVTD_REFLECT_POLICY if allow_uvtd_reflect else 'crop256-only'}
 
 
-def read_crop(path):
+def read_crop(path, allow_uvtd_reflect=False):
     with Image.open(path) as image:
-        image = image.convert('RGB')
+        image, _ = prepare_image(image, allow_uvtd_reflect=allow_uvtd_reflect)
         w, h = image.size
-        if min(w, h) < 256:
-            raise ValueError('Image is smaller than 256; no resizing/padding/discard allowed: {}'.format(path))
         x, y = random.randint(0, w - 256), random.randint(0, h - 256)
         pixels = np.array(image.crop((x, y, x + 256, y + 256)), dtype=np.uint8, copy=True)
     # Same arithmetic/order as ToTensor + Normalize(0.5, 0.5).
@@ -84,4 +114,5 @@ class Stage1Dataset(Dataset):
     def __getitem__(self, index):
         u = self.underwater_paths[index % len(self.underwater_paths)]
         a = self.inair_paths[random.randrange(len(self.inair_paths))]
-        return {'Xu': read_crop(u), 'Xa': read_crop(a), 'Xu_path': str(u), 'Xa_path': str(a)}
+        return {'Xu': read_crop(u, allow_uvtd_reflect=True), 'Xa': read_crop(a),
+                'Xu_path': str(u), 'Xa_path': str(a)}

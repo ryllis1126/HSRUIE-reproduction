@@ -25,7 +25,8 @@ class SmokeGateTests(unittest.TestCase):
             directory.mkdir()
             Image.new('RGB', (256, 256), (255, 0, 0)).save(directory / 'one.png')
             Image.new('RGB', (280, 300), (0, 255, 0)).save(directory / 'two.png')
-            Image.new('RGB', (352, 224)).save(directory / 'small.png')
+            # Unsupported size keeps the original rejection guards meaningful after D-11.
+            Image.new('RGB', (352, 223)).save(directory / 'small.png')
             (self.root / (domain + '.txt')).write_text('one.png\ntwo.png\n', encoding='utf-8')
         self.weights = self.root / 'placeholder.pth'
         self.weights.write_bytes(b'not loaded: stop before model construction')
@@ -99,7 +100,7 @@ class SmokeGateTests(unittest.TestCase):
                 with patch('train_stage1.build_model', side_effect=ReachedModelConstruction):
                     with self.assertRaisesRegex(ValueError, 'data-check blocked'):
                         run(self.args('smoke', domain))
-                self.assertEqual(self.report(domain)[report_key]['too_small'][0]['height'], 224)
+                self.assertEqual(self.report(domain)[report_key]['too_small'][0]['height'], 223)
                 manifest.write_text('one.png\ntwo.png\n', encoding='utf-8')
 
     def test_smoke_rejects_any_listed_unreadable_image_in_either_domain(self):
@@ -139,8 +140,8 @@ class SmokeGateTests(unittest.TestCase):
         for domain in ('u', 'a'):
             Image.new('L', (270, 280)).save(self.root / domain / 'third.png')
             (self.root / (domain + '.txt')).write_text('one.png\ntwo.png\nthird.png\n', encoding='utf-8')
-        def real_crop(path):
-            tensor = read_crop(path)
+        def real_crop(path, **kwargs):
+            tensor = read_crop(path, **kwargs)
             self.assertEqual(tuple(tensor.shape), (3, 256, 256))
             visited.append(Path(path))
             return tensor
