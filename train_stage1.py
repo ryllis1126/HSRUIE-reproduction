@@ -16,7 +16,7 @@ import torch
 import torchvision
 from torch.utils.data import DataLoader
 
-from data.stage1_dataset import Stage1Dataset, check_images, image_paths
+from data.stage1_dataset import Stage1Dataset, check_images, image_paths, read_crop
 from stage1 import (build_model, load_checkpoint, make_optimizer, make_scheduler,
                     save_checkpoint, seed_everything, seed_worker, train_step)
 
@@ -162,6 +162,8 @@ def run(args):
         raise ValueError('Only completed train epochs can be resumed')
     if args.mode != 'data-check' and (args.vgg_weights is None or args.g_init is None):
         raise ValueError('Model modes require explicit --vgg-weights and --g-init')
+    if args.mode == 'smoke' and (args.underwater_manifest is None or args.inair_manifest is None):
+        raise ValueError('Smoke requires explicit underwater and in-air manifests')
     if args.mode == 'train' and (args.underwater_manifest is None or args.inair_manifest is None):
         raise ValueError('Training requires explicit approved domain manifests')
     run_dir = args.output_root.resolve() / args.run_id
@@ -169,9 +171,21 @@ def run(args):
     processed_u = processed_a = global_step = 0
     try:
         write_json(run_dir / 'run.json', provenance(args))
-        paths_u = image_paths(args.underwater_root, args.underwater_manifest)
-        paths_a = image_paths(args.inair_root, args.inair_manifest)
+        # Only smoke may scope its gate to an explicit diagnostic manifest.
+        # data-check/train must check the full domain even with manifests.
+        paths_u = image_paths(args.underwater_root, args.underwater_manifest if args.mode == 'smoke' else None)
+        paths_a = image_paths(args.inair_root, args.inair_manifest if args.mode == 'smoke' else None)
+        if args.mode == 'smoke' and (len(paths_u) < 2 or len(paths_a) < 2):
+            raise ValueError('Smoke manifests must each contain at least 2 distinct images')
         report = {'underwater': check_images(paths_u), 'inair': check_images(paths_a)}
+        if args.mode == 'smoke':
+            for domain in report.values():
+                for record in domain['records']:
+                    if min(record['width'], record['height']) >= 256:
+                        try:
+                            read_crop(record['path'])  # Validate every listed RGB/crop, not just the sampled batch.
+                        except (OSError, ValueError) as exc:
+                            domain['errors'].append({'path': record['path'], 'error': str(exc)})
         write_json(run_dir / 'data_check.json', report)
         ready = all(not d['too_small'] and not d['errors'] for d in report.values())
         print(json.dumps({'data_ready': ready, 'report': str(run_dir / 'data_check.json')}))
@@ -181,6 +195,15 @@ def run(args):
             write_json(run_dir / 'end.json', {'end_utc': now(), 'status': 'data-check passed',
                        'processed_images': len(paths_u) + len(paths_a), 'failed': 0, 'skipped': 0})
             return
+        if args.mode == 'train':
+            # Keep the actual training selection and checkpoint config.data as before;
+            # the full-domain gate above cannot be bypassed by that selection.
+            paths_u = image_paths(args.underwater_root, args.underwater_manifest)
+            paths_a = image_paths(args.inair_root, args.inair_manifest)
+            report = {'underwater': check_images(paths_u), 'inair': check_images(paths_a)}
+            write_json(run_dir / 'training_data_check.json', report)
+            if any(d['too_small'] or d['errors'] for d in report.values()):
+                raise ValueError('Training data-check blocked: invalid images in training manifests')
         vgg = args.vgg_weights.resolve(strict=True)
         config = {k: getattr(args, k) for k in ('mode', 'g_init', 'batch_size', 'lr', 'beta1',
                   'fixed_epochs', 'decay_epochs', 'num_workers', 'seed', 'device')}

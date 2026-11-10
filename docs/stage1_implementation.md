@@ -1,6 +1,6 @@
 # Stage 1 最小实现方案与验收记录
 
-日期：2026-11-09；分支 repro/stage1；基线 ed2e873fb3a6f0f9afada5b78fe6589a4f5404d4。
+更新日期：2026-11-10；分支 repro/stage1；Smoke门禁修复基线55aad4a3e66abb5620669618ea3aa9f8c2bed8a2。以下11月9日实现/测试内容保留为历史证据，最新门禁与测试记录见文末。
 
 ## 当前方案（先更新方案，再实施并测试）
 
@@ -18,7 +18,7 @@
 
 **必要工程假设**：新Dataset一个样本包含独立Xu/Xa，batch=2即每域2张；epoch=max(Nu,Na)，水下索引循环、空气随机有放回（沿用未配对模板的简单采样思路），尾批保留。两域各自合法随机裁剪，无翻转/resize/其他增强。损失使用L1 mean、每图CHW cosine（torch默认eps）、逐样本hinge再mean，均在[-1,1]；不把这些归约称为原文明示。
 
-**数据门禁**：data-check完整列出短边不足256和不可读图，不加载模型。发现任一问题，smoke/train整次拒绝启动，不筛除样本、不越界crop，不生成副本；等待用户后续决定。显式图像清单用于固定数据范围；未提供清单只用于data-check，不允许正式训练。禁止把检测split自动当增强split。
+**数据门禁（2026-11-10更新）**：data-check/train始终检查完整Raw/HR域，即使提供manifest也不能绕过。Smoke必填两份人工清单，每域至少2张，仅对清单内全部图片执行路径、解码、尺寸与实际RGB256crop检查；域外小图/坏图不影响Smoke。检查范围内任一问题仍阻止模型构造；不筛除样本、不越界crop、不生成副本。train全域通过后另查实际训练清单，保留原config.data内容和checkpoint字段。禁止把检测split自动当增强split。
 
 **日程**：训练epoch1–50为1e-4，51为1e-4，52为9.8e-5，100为2e-6；epoch100完成后scheduler降到0。每次在该epoch全部optimizer更新完成后step。最后50个非零epoch在边界线性降到0；重复平台端点属于离散边界解释，不是新增论文事实。
 
@@ -38,7 +38,7 @@
 |---|---|
 | 新增 `data/stage1_dataset.py` | 明确两域根/可选清单，目录仅枚举当前层图像，避免自动混入HR/LR子目录；全量data-check记录；RGB、合法256crop、原值域；不筛除小图 |
 | 新增 `stage1.py` | 三项损失、冻结E/共享G、复用SAD初始化、原Adam参数、epoch线性调度、必要checkpoint/RNG恢复；不依赖原训练链 |
-| 新增 `train_stage1.py` | 必填mode、data-check/smoke/train；新run排他创建；全域data-check门禁；模型模式必填VGG路径和初始化选择；正式训练必填两域清单；逐epoch保存/恢复；运行来源记录 |
+| 新增 `train_stage1.py` | 必填mode、data-check/smoke/train；新run排他创建；data-check/train全域门禁、Smoke人工清单门禁；模型模式必填VGG路径和初始化选择；正式训练必填两域清单；逐epoch保存/恢复；运行来源记录 |
 | 修改 `models/vggloss.py` | 仅可选路径/设备构造适配；旧零参数调用保持原加载规则；新路径CPU map_location后to(device)，strict加载；forward原样 |
 | 新增 `tests/test_stage1.py` | 17项CPU合成契约验证，包括真实SAD类、小尺寸合成特征和真实VGG19 feature架构的合成权重fixture |
 | 新增/更新本文 | 最小方案、证据、假设、实际结果、服务器命令与剩余问题 |
@@ -101,7 +101,7 @@ python -B train_stage1.py --mode smoke \
   --run-id "smoke-$(date +%Y%m%dT%H%M%S)-$$"
 ```
 
-清单一行一个root相对图像路径，不接受域外路径或重复项。未提供清单时仅枚举root当前层；若Flickr2K实际图像位于HR子目录，应由操作者明确把root设为已核实HR目录，入口不自动选择或递归混入LR。全域data-check若发现小图，仍表示训练数据未就绪；小范围smoke成功不能消除该阻塞。
+清单一行一个root相对图像路径，不接受域外路径或重复项。Smoke必须提供两份清单，各至少2张；其data_check.json只列清单图片。data-check/train全域检查沿用当前层Raw/HR图像枚举，不受manifest缩小；train另写training_data_check.json验证实际训练清单，checkpoint config.data仍记录训练选择。若Flickr2K实际图像位于HR子目录，应由操作者明确把root设为已核实HR目录，入口不自动选择或递归混入LR。全域data-check若发现小图，仍表示训练数据未就绪；小范围smoke成功不能消除该阻塞。
 
 smoke固定只取一个每域2张的256 batch，检查真实VGG三个尺度、原SAD输出/值域、E全部冻结且不变、两域输出梯度、SAD活动/未调用参数、有限更新、完整包和strict G恢复输出；保存`smoke_checkpoint.pth`及结束报告。该包标为mode=smoke/epoch=0，不允许作为正式train续训。正式训练仅接受mode=train的已完成epoch包，恢复用`--resume <epoch_XXXX.pth>`及全新run-id，关键配置/清单/VGG指纹必须相同；不提供或执行正式100epoch命令。
 
@@ -112,3 +112,46 @@ smoke固定只取一个每域2张的256 batch，检查真实VGG三个尺度、�
 3. **短边与正式split待决定**：不自动放大/pad/丢弃；真实数据全域盘点需在服务器执行。正式训练清单和后续未见测试隔离不能从检测split或文件总数推断，SUIM TEST不参与。
 4. **服务器验收尚未执行**：真实预训练VGG权重严格加载/哈希、真实HR文件范围、真实E→SAD的256前向/反向/更新/恢复及3090资源开销仍待记录；本地CUDA未用于模型测试，无多卡实现。
 5. **结果边界**：实现可测试不等于论文忠实复现。新训练G不自动与既有NC/HIGH权重组合或论文指标可比。只有真实服务器各项单Batch验收完成并审核后，才能考虑另行授权正式训练。
+
+## 2026-11-10 Smoke 数据门禁修复计划
+
+**用户授权的工程适配**：Smoke 必填两份人工 manifest，每域至少两张，只检查清单中真实存在、可解码、尺寸足够且可合法256裁剪的全部图像。data-check/train 的门禁覆盖完整域，不得通过 manifest 绕过；不改图像、模型、损失、优化器、日程或 checkpoint 格式。
+
+**源码事实（修复前，HEAD 55aad4a）**：`train_stage1.py:171–172` 直接按可选 manifest 选择检查范围，因此 Smoke 已支持部分范围，但未要求清单/最少数量；train 和 data-check 提供清单时也会缩小门禁范围。修复只改入口中检查范围的选择，不重构 Dataset。
+
+实施顺序：
+
+- [x] 新增 `tests/test_stage1_smoke_gate.py`：先验证缺清单/不足两张、全域门禁绕过等缺口；覆盖合法Smoke、清单小图/坏图/路径错误以及data-check/train全域失败。
+- [x] 最小修改 `train_stage1.py`：Smoke清单门禁；data-check/train全域门禁；train实际训练清单单独验证并保留原config.data结构。
+- [x] 运行原17项及新增全部CPU合成测试，保存独立日志、运行来源、diff；补录结果与D-09边界补充。禁止真实GPU/正式训练、commit/push/reset。
+
+### 本次实际变更与验证（2026-11-10）
+
+**实际修改文件**：`train_stage1.py`、`tests/test_stage1_smoke_gate.py`（新增）、本文、`docs/decision_log.md`（D-10）。生产代码仅入口增加26行、替换3行；没有修改原17项测试。`data/stage1_dataset.py`、`stage1.py`、全部models/options、原train.py/test.py均无差异；checkpoint字段和config.data的实际训练清单含义保持原状。Train增加的`training_data_check.json`是运行报告，不是checkpoint格式变更。
+
+**本地实验事实**：Run `stage1-smoke-gate-20261110-01-final`，2026-11-10 17:23:48–17:23:57（Asia/Shanghai，原记录UTC）；Python3.8.20、torch2.0.1+cu118、torchvision0.15.2+cu118、NumPy1.24.4、Pillow9.4.0；仅CPU，测试子进程显式`CUDA_VISIBLE_DEVICES=''`。命令：
+
+```text
+D:/Miniconda3/envs/hsruie/python.exe -B -m unittest discover -s tests -p "test_stage1*.py" -v
+```
+
+**结果：27通过、0失败、0跳过；原17项全部保留并通过，新增10项门禁测试。** unittest耗时6.835秒。新增测试在真实临时图像/清单上执行入口；只有模型构造处用异常哨兵停止，不运行真实VGG权重或GPU。原17项的SAD/VGG feature检查范围仍为上文所述的CPU合成fixture，不能写成服务器验收。
+
+| 新增测试覆盖 | 最终结果 |
+|---|---|
+| 全域data-check（无manifest/提供合法manifest）遇小图 | 两种调用都失败，报告包含域内小图 |
+| 合法Smoke清单、清单外有小图和坏图 | 清单内两图/域数据检查通过并到达模型构造边界，报告不混入清单外图片；原图字节不变 |
+| Smoke缺任一清单/两份都缺 | 显式拒绝，在run目录创建前失败 |
+| 任一域清单只有1张 | 拒绝；不通过重复同图满足数量 |
+| 任一域清单包含第3张小图 | 失败并报告，不仅检查将抽到的batch |
+| 任一域清单包含第3张不可读图 | 失败并报告 |
+| 清单文件不存在的图、越域路径、重复路径 | 全部拒绝 |
+| Train提供合法清单，但全域有小图 | 全域门禁仍失败，不构造模型 |
+| Smoke每份清单3张（含灰度图）的实际crop调用 | 两域全部6条路径都经原read_crop，输出3×256×256 |
+| Train全域通过但清单选中不可读嵌套图 | 第二层清单复核失败，保留全域/清单两份报告 |
+
+**RED→GREEN证据**：首次针对8项测试的修复前运行有7个失败子项（预期暴露缺清单/数量与全域绕过），详见[red_output.txt](../runs/stage1-smoke-gate-20261110-01/red_output.txt)。随后25项完整回归通过。独立审查确认无实现层Critical/Important问题，提示两个检查分支的覆盖仍不足；将其按安全门禁覆盖缺口处理，补2项测试，并临时移除对应检查，观察2项均失败后原样恢复，详见[review_red_output.txt](../runs/stage1-smoke-gate-20261110-01/review_red_output.txt)。最终完整27项通过；临时探针均已移除，无待处理审查项。
+
+**完整交付证据**：[全部测试输出](../runs/stage1-smoke-gate-20261110-01/final_test_output.txt)、[环境/命令/源码快照/种子与指纹](../runs/stage1-smoke-gate-20261110-01/final_record.json)、[完整diff（含新增测试）](../runs/stage1-smoke-gate-20261110-01/changes.patch)。记录目录独立、不覆盖11月9日实验。记录采集曾遇PowerShell环境默认GBK读取中文Git diff失败，在执行最终测试前改为显式UTF-8；不是模型/测试失败。
+
+**本次边界**：不修改图片，不自动生成/过滤任何Smoke清单，不改变实际VGG/SAD、loss、Adam、LR或checkpoint。服务器命令沿用上文Linux Smoke示例，强制两份人工清单各≥2张。504张短边不足是用户提供的服务器全域data-check结果，本次未复查服务器；Smoke数据检查通过不代表这504张图的训练处理方案已解决。未启动真实GPU验收、正式训练、commit、push或reset。

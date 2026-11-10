@@ -66,7 +66,14 @@
 - **未认证项**：SAD/G逐层对应、作者Stage1初始化未有直接证据。显式选择constructor或作者工厂normal流程；batch每域2、归约与采样记工程假设，不冒充论文事实。
 - **授权边界**：当前允许实现与本地合成数据轻量检查；未执行正式训练。服务器路径按用户最新确认使用，不再要求本agent远程核实。细节与测试结果见 [实现文档](stage1_implementation.md)。
 
-## 后续日志维护
+## D-10：Smoke仅检查人工清单，训练保持全域门禁（2026-11-10）
+
+- **决定/授权**：按用户本次任务，Smoke必填underwater/inair两份人工manifest，每份至少2张独立图片；逐项验证路径、解码、短边≥256和实际RGB256crop。只检查清单，不从全域报告自动生成或过滤清单。
+- **替代范围**：仅更新D-09中Smoke被全域小图阻塞的边界；data-check/train始终扫描完整Raw/HR域，即使manifest全合法，也不能绕过域内小图/坏图。保留不resize/padding/过滤/删除原图及正式split待确认的限制。
+- **源码证据**：`train_stage1.py:165–207`为必填/数量校验、分模式门禁与train清单复核；复用原`image_paths/check_images/read_crop`，不改Dataset、E/G、损失、optimizer、scheduler或checkpoint格式。有效训练配置仍记录原训练清单内容。
+- **验收边界**：仅运行本地合成CPU回归；真实VGG19+SAD服务器Smoke和正式训练仍未执行。服务器504张小图是用户提供的data-check结果，本次不冒充重新盘点。详见[实现与测试记录](stage1_implementation.md)。
+
+## 后续记录规则
 
 新决策应追加编号、日期、证据、影响、状态和替代关系。若旧决策被替代，保留原记录并注明替代项；不能静默把 LOW-on、HDE 3×3、训练结果或全量认证改写成早已完成的事实。
 
