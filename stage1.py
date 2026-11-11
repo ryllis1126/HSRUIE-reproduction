@@ -15,7 +15,9 @@ from torch.nn import functional as F
 def validate_image(x):
     if x.ndim != 4 or x.shape[0] == 0 or x.shape[1] != 3 or x.dtype != torch.float32:
         raise ValueError('Expected a nonempty float32 Bx3xHxW image batch')
-    if not torch.isfinite(x).all() or x.min() < -1 or x.max() > 1:
+    # Combine device predicates before the single host decision.
+    valid = torch.isfinite(x).all() & (x.min() >= -1) & (x.max() <= 1)
+    if not valid:
         raise ValueError('Expected finite images in [-1,1]')
 
 
@@ -136,6 +138,18 @@ def load_checkpoint(path, model, optimizer, scheduler, config):
     return checkpoint['epoch'], checkpoint['global_step']
 
 
+def validate_gradients(grads):
+    if not grads:
+        raise RuntimeError('Missing/nonfinite generator gradients')
+    # Check every gradient on-device, then read one aggregate flag. Do not
+    # short-circuit in Python: each device boolean would synchronize CUDA.
+    finite = torch.stack([torch.isfinite(g).all() for g in grads]).all()
+    if not finite:
+        raise RuntimeError('Missing/nonfinite generator gradients')
+    if not any(torch.count_nonzero(g).item() for g in grads):
+        raise RuntimeError('All generator gradients are zero')
+
+
 def train_step(model, optimizer, xa, xu):
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -143,11 +157,11 @@ def train_step(model, optimizer, xa, xu):
     losses = stage1_losses(xa, xu, ya, yu)
     losses['total'].backward()
     grads = [p.grad for p in model.G.parameters() if p.grad is not None]
-    if not grads or not all(torch.isfinite(g).all() for g in grads):
-        raise RuntimeError('Missing/nonfinite generator gradients')
-    if not any(torch.count_nonzero(g).item() for g in grads):
-        raise RuntimeError('All generator gradients are zero')
+    validate_gradients(grads)
     if any(p.grad is not None for p in model.E.parameters()):
         raise RuntimeError('Frozen encoder accumulated gradients')
     optimizer.step()
-    return {key: float(value.detach()) for key, value in losses.items()}
+    # All six metrics are scalar float32 in the existing objective. Transfer
+    # them together without retaining their autograd graphs.
+    values = torch.stack([value.detach() for value in losses.values()]).cpu().tolist()
+    return dict(zip(losses, values))
